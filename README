@@ -1,0 +1,58 @@
+You need to meet the following requirements before running the sample:
+
+1. Launch in a region where you have your default AWS VPC;
+
+2. Your default AWS VPC must have the default public subnets;
+
+3. Create a VPC endpoint [1], in your default VPC, and specify the following rule to allow access to S3 services;
+
+   3.1 Access VPC Dashboard;
+
+   3.2 On the left side panel, click on "Endpoints";
+
+   3.3 Click on Create Endpoint and fill up the following information:
+
+       * VPC (Your default AWS VPC)
+
+       * Service (S3 endpoint)
+
+       * Policy: (Attached file: VPC_Endpoint_S3_policy.json)
+
+Now, please follow the steps below in order to run the sample:
+
+1. Upload the lambda code which will be responsible for creating your DB schema (Attached file: index.zip) along to the sql file responsible for creating the schema to a bucket in S3. Please take not of the S3 bucket and Key, as you will need to inform these values during stack creation.
+
+  i.e.: Region          : us-east-1
+        S3 Bucket       : aws-<somename>-lambda
+        S3 Key (Lambda) : lambda/index.zip
+        S3 Key (Schema) : lambda/rds-schema/schema.up.sql
+
+2. Launch the sample stack with the following command:
+
+$ aws cloudformation create-stack --stack-name rds-lambda-final-10 --template-body file://rds-lambda.json \
+ --parameters ParameterKey=DBName,ParameterValue=MyNewDB ParameterKey=DBUser,ParameterValue=myadmin ParameterKey=DBPassword,ParameterValue=admin123 \
+ ParameterKey=MyS3Bucket,ParameterValue=<S3_BUCKET> ParameterKey=MyS3KeySchema,ParameterValue=<S3_KEY_SCHEMA> \
+ ParameterKey=MyS3KeyLambda,ParameterValue=<S3_KEY_LAMBDA> ParameterKey=myLambdaSubnetIDs,ParameterValue=\"<SUBNET1>,<SUBNET2>\" \
+ --capabilities CAPABILITY_IAM --region <REGION> --disable-rollback 
+
+3. Once the stack is complete, you can connect to the database and check that there is an additional table there named "users10". 
+
+How does it work?
+
+Well, If you take a look at the template, you will see that the Custom Resource named "PrepareMyDBSchema" depends on the RDS instance (MyDB) and the lambda function (MyLambda). This Custom resource when created will trigger the lambda previously created, informing the following parameters in the input:
+
+ * S3Bucket: S3 bucket where the schema.up.sql is
+ * S3Key: S3 Key for the schema.up.sql
+ * Dbconn: Full connection string to access the database, user:pwd@server:port/DB
+
+Next, when the lambda function starts, it will obtain the file from the S3, connect to the database and execute a query with the contents of the file. Obviously, if you wish to run more than one query, you will need to adjust the sample. Additionally, you will also need to review the connection string along with the nodejs package to handle the database, in case you wish to use another database than Postgres.
+
+Further, in the template, you will notice that some security groups are also necessary, as we need to allow the lambda security group to access the RDS database security group.
+
+Finally, your lambda also needs to have the following permissions within its IAM Role:
+
+ * AWSLambdaVPCAccessExecutionRole
+ * AWSLambdaBasicExecutionRole
+ * AmazonS3ReadOnlyAccess
+
+

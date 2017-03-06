@@ -1,0 +1,118 @@
+{
+    "AWSTemplateFormatVersion": "2010-09-09",
+    "Description": "Testing Custom Resource to create RDS schema",
+    "Parameters": {
+        "DBName": {
+            "Type": "String",
+            "Description": "DBUser",
+            "Default": "MyDB"
+        },
+        "DBUser": {
+            "Type": "String",
+            "Description": "DBUser"
+        },
+        "DBPassword": {
+            "Type": "String",
+            "Description": "DBPassword"
+        }
+    },
+    "Resources": {
+        "MyLambda": {
+            "DependsOn": "LambdaExecutionRole",
+            "Type": "AWS::Lambda::Function",
+            "Properties": {
+                "Code": {
+                    "S3Bucket": "aws-davidiog-general-us-east-1",
+                    "S3Key": "lambda/index.zip"
+                },
+                "Description": "Connect to MyDB and execute a SQL file stored in S3",
+                "FunctionName": {"Fn::Join":["_", ["LoadMyDBSchema", {"Ref" : "DBName"}, {"Ref": "AWS::StackName"}]]},
+                "Handler": "index.handler",
+                "MemorySize": "128",
+                "Role": {
+                    "Fn::GetAtt": ["LambdaExecutionRole", "Arn"]
+                },
+                "Runtime": "nodejs4.3",
+                "Timeout": "60"
+            }
+        },
+        "LambdaExecutionRole": {
+            "Type": "AWS::IAM::Role",
+            "Properties": {
+                "AssumeRolePolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Principal": {
+                                "Service": [
+                                    "lambda.amazonaws.com"
+                                ]
+                            },
+                            "Action": [
+                                "sts:AssumeRole"
+                            ]
+                        }
+                    ]
+                },
+                "Path": "/",
+                "Policies": [
+                    {
+                        "PolicyName": "root",
+                        "PolicyDocument": {
+                            "Version": "2012-10-17",
+                            "Statement": [
+                                {
+                                    "Effect": "Allow",
+                                    "Action": [
+                                        "logs:*"
+                                    ],
+                                    "Resource": "arn:aws:logs:*:*:*"
+                                },
+                                {
+                                    "Effect": "Allow",
+                                    "Action": [
+                                        "s3:GetObject",
+                                        "s3:PutObject"
+                                    ],
+                                    "Resource": "arn:aws:s3:::*"
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        },
+        "PrepareMyDBSchema": {
+            "DependsOn": [
+                "MyLambda"
+            ],
+            "Type": "Custom::PrepareDBSchema",
+            "Properties": {
+                "ServiceToken": {
+                    "Fn::Join": [
+                        "",
+                        [
+                            "arn:aws:lambda:",
+                            {
+                                "Ref": "AWS::Region"
+                            },
+                            ":",
+                            {
+                                "Ref": "AWS::AccountId"
+                            },
+                            ":function:",
+                            {
+                                "Ref": "MyLambda"
+                            }
+                        ]
+                    ]
+                },
+                "S3bucket": "aws-davidiog-general-us-east-1",
+                "S3key": "lambda/rds-schema/schema.up.sql",
+                "Dbconn":  "pg://admin1:admin123@rrm1x2u5amp07dji.cc3jldiiybuf.us-east-1.rds.amazonaws.com:5432/MyNewDB"
+                
+            }
+        }
+    }
+}

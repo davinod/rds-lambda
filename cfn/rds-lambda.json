@@ -1,0 +1,203 @@
+{
+    "AWSTemplateFormatVersion": "2010-09-09",
+    "Description": "Testing Custom Resource to create RDS schema",
+    "Parameters": {
+        "DBName": {
+            "Type": "String",
+            "Description": "DBUser",
+            "Default": "MyDB"
+        },
+        "DBUser": {
+            "Type": "String",
+            "Description": "DBUser"
+        },
+        "DBPassword": {
+            "Type": "String",
+            "Description": "DBPassword"
+        },
+        "MyS3Bucket":{
+            "Type":"String",
+            "Description": "Name of the S3Bucket where the sql file is"
+        },
+        "MyS3KeySchema":{
+            "Type":"String",
+            "Description": "Name of the S3key where the sql file is"
+        },
+        "MyS3KeyLambda":{
+            "Type":"String",
+            "Description": "Name of the S3key where the sql file is"
+        },
+        "myLambdaSubnetIDs": {
+            "Description": "Subnet IDs where the Lambda function will be (subnets must below to the same VPC with the VPC Endpoint)",
+            "Type": "List<AWS::EC2::Subnet::Id>"
+        }        
+    },
+    "Resources": {
+        "LambdaSecurityGroup": {
+            "Type": "AWS::EC2::SecurityGroup",
+            "Properties": {
+                "GroupDescription": "Lambda Security Group"
+            }
+        },
+        "DBSecurityGroup": {
+            "Type": "AWS::RDS::DBSecurityGroup",
+            "Properties" : {
+            "GroupDescription" : "Ingress for Amazon Lambda security group",
+            "DBSecurityGroupIngress" : [ {
+                  "EC2SecurityGroupId" : {"Fn::GetAtt" : ["LambdaSecurityGroup", "GroupId"]},
+                  "EC2SecurityGroupOwnerId" : {"Ref":"AWS::AccountId"}
+               }]
+            }
+        },
+        "MyDB": {
+            "Type": "AWS::RDS::DBInstance",
+            "Properties": {
+                "DBName": {
+                    "Ref": "DBName"
+                },
+                "DBSecurityGroups" : [ {"Ref" : "DBSecurityGroup"} ],
+                "AllocatedStorage": "100",
+                "DBInstanceClass": "db.m3.xlarge",
+                "Engine": "postgres",
+                "EngineVersion": "9.5.4",
+                "Iops": "1000",
+                "MasterUsername": {
+                    "Ref": "DBUser"
+                },
+                "MasterUserPassword": {
+                    "Ref": "DBPassword"
+                }
+            }
+        },
+        "MyLambda": {
+            "DependsOn": "LambdaExecutionRole",
+            "Type": "AWS::Lambda::Function",
+            "Properties": {
+                "Code": {
+                    "S3Bucket": {"Ref":"MyS3Bucket"},
+                    "S3Key": {"Ref":"MyS3KeyLambda"}
+                },
+                "Description": "Connect to MyDB and execute a SQL file stored in S3",
+                "FunctionName": {
+                    "Fn::Join": [
+                        "_",
+                        [
+                            "LoadMyDBSchema",
+                            {
+                                "Ref": "DBName"
+                            },
+                            {
+                                "Ref": "AWS::StackName"
+                            }
+                        ]
+                    ]
+                },
+                "Handler": "index.handler",
+                "MemorySize": "128",
+                "Role": {
+                    "Fn::GetAtt": [
+                        "LambdaExecutionRole",
+                        "Arn"
+                    ]
+                },
+                "Runtime": "nodejs4.3",
+                "Timeout": "60",
+                "VpcConfig":{
+                    "SubnetIds":["subnet-73cdbf2b","subnet-7984f353"],
+                    "SecurityGroupIds": [{"Fn::GetAtt" : ["LambdaSecurityGroup", "GroupId"]}]
+
+                }
+            }
+        },
+        "LambdaExecutionRole": {
+            "Type": "AWS::IAM::Role",
+            "Properties": {
+                "AssumeRolePolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Principal": {
+                                "Service": [
+                                    "lambda.amazonaws.com"
+                                ]
+                            },
+                            "Action": [
+                                "sts:AssumeRole"
+                            ]
+                        }
+                    ]
+                },
+                "Path": "/",
+                "ManagedPolicyArns": [
+                    "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole",
+                    "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+                    "arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess"
+                ]
+            }
+        },
+        "PrepareMyDBSchema": {
+            "DependsOn": [
+                "MyDB",
+                "MyLambda"
+            ],
+            "Type": "Custom::PrepareDBSchema",
+            "Properties": {
+                "ServiceToken": {
+                    "Fn::Join": [
+                        "",
+                        [
+                            "arn:aws:lambda:",
+                            {
+                                "Ref": "AWS::Region"
+                            },
+                            ":",
+                            {
+                                "Ref": "AWS::AccountId"
+                            },
+                            ":function:",
+                            {
+                                "Ref": "MyLambda"
+                            }
+                        ]
+                    ]
+                },
+                "S3bucket": {"Ref":"MyS3Bucket"},
+                "S3key": {"Ref":"MyS3KeySchema"},
+                "Dbconn": {
+                    "Fn::Join": [
+                        "",
+                        [
+                            "pg://",
+                            {
+                                "Ref": "DBUser"
+                            },
+                            ":",
+                            {
+                                "Ref": "DBPassword"
+                            },
+                            "@",
+                            {
+                                "Fn::GetAtt": [
+                                    "MyDB",
+                                    "Endpoint.Address"
+                                ]
+                            },
+                            ":",
+                            {
+                                "Fn::GetAtt": [
+                                    "MyDB",
+                                    "Endpoint.Port"
+                                ]
+                            },
+                            "/",
+                            {
+                                "Ref": "DBName"
+                            }
+                        ]
+                    ]
+                }
+            }
+        }
+    }
+}
